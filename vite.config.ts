@@ -25,9 +25,6 @@ const pwaConfig: Partial<VitePWAOptions> = {
       }
     ]
   },
-  strategies: "injectManifest",
-  srcDir: 'src/Components/SW',
-  filename: 'sw.ts'
 }
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
