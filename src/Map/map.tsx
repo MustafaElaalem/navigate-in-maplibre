@@ -282,9 +282,6 @@ function MapComponent() {
           height: "400px",
         }}
       />
-      {/* <div className="sidebar" style={{ width: "200px" }}>
-        Longitude: {lng} | Latitude: {lat} | Zoom: {zoom}
-      </div> */}
     </div>
   );
 }
