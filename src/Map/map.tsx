@@ -1,16 +1,22 @@
 // Map.js
-import maplibregl from "maplibre-gl";
+import maplibregl, { GeolocateControl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import React, { useEffect, useRef, useState } from "react";
-import { PlacePoint, RouteData } from "./types";
+import { useEffect, useRef, useState } from "react";
+import toast from "react-hot-toast";
+import { RouteWithGeometry } from "./routeType";
+import { PlacePoint } from "./types";
 import { hideMarker, showMarker } from "./utilities";
+import useCompass from "./useCompass";
+
+const routeLayerId = "route";
+const routeSourceId = "routeSource";
+const lng = 31.220359988367647;
+const lat = 0.06100948209334;
+const zoom = 10;
 
 function MapComponent() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
-  const [lng, setLng] = React.useState(-70.9);
-  const [lat, setLat] = React.useState(42.35);
-  const [zoom, setZoom] = React.useState(9);
 
   useEffect(() => {
     if (map.current) return; // prevent map from initializing more than once
@@ -30,17 +36,66 @@ function MapComponent() {
       map.current = null;
     };
   }, [mapContainer.current]);
+  const [lonlat, setLonlat] = useState({ lon: 0, lat: 0 });
+  const [degree] = useCompass({ latitude: lonlat.lat, longitude: lonlat.lon });
+  console.log(degree);
+
   useEffect(() => {
-    const sub = map.current?.on("move", (e) => {
-      const long = e.target.getCenter().lng.toFixed(4);
-      const lat = e.target.getCenter().lat.toFixed(4);
-      const zoom = e.target.getZoom().toFixed(4);
-      setLng(Number(long));
-      setLat(Number(lat));
-      setZoom(Number(zoom));
-    });
-    return () => sub?.unsubscribe();
+    let sub: maplibregl.Subscription;
+    if (map.current) {
+      sub = map.current.on("load", () => {
+        map.current?.addSource(routeSourceId, {
+          type: "geojson",
+          data: {
+            type: "FeatureCollection",
+            features: [],
+          },
+        });
+        map.current?.addLayer({
+          id: routeLayerId,
+          type: "line",
+          source: routeSourceId,
+          layout: {
+            "line-join": "round",
+            "line-cap": "round",
+          },
+          paint: {
+            "line-color": "#888",
+            "line-width": 2,
+          },
+        });
+
+        const glc = new GeolocateControl({
+          trackUserLocation: true,
+          showUserLocation: false,
+          showAccuracyCircle: true,
+          fitBoundsOptions: { animate: true },
+          positionOptions: { enableHighAccuracy: true },
+        });
+        glc.on("geolocate", (geoData) => {
+          console.log(geoData);
+          setLonlat({
+            lat: geoData.coords.latitude,
+            lon: geoData.coords.longitude,
+          });
+          toast(
+            `lat: ${geoData.coords.latitude}, lon:${geoData.coords.longitude}, H:${geoData.coords.heading}`,
+            {
+              position: "top-right",
+              style: { backgroundColor: "black", color: "white" },
+            }
+          );
+        });
+        map.current?.addControl(glc, "bottom-right");
+      });
+    }
+    return () => {
+      if (sub) sub.unsubscribe();
+    };
   }, [map.current]);
+  // @ts-ignore
+  window._map = map.current;
+
   const [focusedInput, setFocusedInput] = useState<HTMLInputElement | null>(
     null
   );
@@ -69,7 +124,7 @@ function MapComponent() {
   }>({ type: "", places: [] });
   async function searchPlace(q: string, type: string) {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${q}&format=json`
+      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&countrycodes=eg`
     );
     const data = await res.json();
     setPlacesOptions({ type, places: data });
@@ -85,7 +140,7 @@ function MapComponent() {
     };
   }, [toSearchQuery, fromSearchQuery]);
 
-  const [routeData, setRouteData] = useState<RouteData>({
+  const [routeData, setRouteData] = useState<RouteWithGeometry>({
     code: "",
     routes: [],
     waypoints: [],
@@ -149,9 +204,10 @@ function MapComponent() {
     if (toSelectedPlace.name && fromSelectedPlace.name) {
       (async () => {
         const res = await fetch(
-          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${fromSelectedPlace.lon},${fromSelectedPlace.lat};${toSelectedPlace.lon},${toSelectedPlace.lat}?overview=false&alternatives=false&steps=true`
+          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${fromSelectedPlace.lon},${fromSelectedPlace.lat};${toSelectedPlace.lon},${toSelectedPlace.lat}?alternatives=false&steps=true&overview=full&geometries=geojson`
         );
         const data = await res.json();
+        console.log(data);
         setRouteData(data);
       })();
     }
@@ -159,7 +215,29 @@ function MapComponent() {
   // draw route
   useEffect(() => {
     console.log("routeData", routeData);
-  }, [routeData]);
+    if (map.current && routeData.routes[0]) {
+      const geom = routeData.routes[0]?.geometry as {
+        coordinates: number[][];
+        type: "LineString";
+      };
+      // const sourceId = map.current.getLayer(routeLayerId)?.source;
+      // if (!sourceId) return;
+      const source =
+        map.current.getSource<maplibregl.GeoJSONSource>(routeSourceId);
+      source?.setData({
+        type: "Feature",
+        properties: {},
+        geometry: geom,
+      });
+      const data = source?.getData();
+      // data?.then((features) => {
+      //   if (features) {
+      //     const zz = features.bbox as maplibregl.LngLatBoundsLike;
+      //     map.current?.fitBounds(zz, { padding: 20 });
+      //   }
+      // });
+    }
+  }, [routeData, map.current]);
 
   return (
     <div
@@ -238,18 +316,17 @@ function MapComponent() {
         </div>
         <ul
           style={{
-            display: "flex",
             listStyle: "none",
             padding: 0,
             margin: 0,
-            justifyContent: "center",
-            flexDirection: "column",
+            maxHeight: "200px",
+            overflow: "auto",
           }}
         >
           {placesOptions.places.map((p) => (
             <li
               key={p.place_id}
-              style={{ cursor: "pointer" }}
+              style={{ cursor: "pointer", margin: "10px 0" }}
               onClick={() => {
                 if (placesOptions.type === "from") {
                   setFromSearchQuery("");

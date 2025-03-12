@@ -1,5 +1,6 @@
 import "./App.css";
 import MapComponent from "./Map/map";
+import { Toaster } from "react-hot-toast";
 
 function App() {
   return (
@@ -7,6 +8,7 @@ function App() {
       <div>
         MAP
         <MapComponent />
+        <Toaster />
       </div>
     </>
   );
