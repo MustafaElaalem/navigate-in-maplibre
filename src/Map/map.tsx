@@ -1,12 +1,11 @@
 // Map.js
-import maplibregl, { GeolocateControl } from "maplibre-gl";
+import maplibregl, { GeoJSONSource, GeolocateControl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
-import toast from "react-hot-toast";
 import { RouteWithGeometry } from "./routeType";
 import { PlacePoint } from "./types";
-import { hideMarker, showMarker } from "./utilities";
 import useCompass from "./useCompass";
+import { hideMarker, showMarker } from "./utilities";
 
 const routeLayerId = "route";
 const routeSourceId = "routeSource";
@@ -37,13 +36,23 @@ function MapComponent() {
     };
   }, [mapContainer.current]);
   const [lonlat, setLonlat] = useState({ lon: 0, lat: 0 });
-  const [degree] = useCompass({ latitude: lonlat.lat, longitude: lonlat.lon });
-  console.log(degree);
+  const [degree, elss] = useCompass({
+    latitude: lonlat.lat,
+    longitude: lonlat.lon,
+  });
+  useEffect(() => {
+    // toast(`Degree: ${degree}, - ${elss}`, {
+    //   position: "bottom-left",
+    //   style: { backgroundColor: "black", color: "white" },
+    // });
+    console.log("==>", degree);
+  }, [degree, elss]);
 
+  // add layers
   useEffect(() => {
     let sub: maplibregl.Subscription;
     if (map.current) {
-      sub = map.current.on("load", () => {
+      sub = map.current.on("load", async () => {
         map.current?.addSource(routeSourceId, {
           type: "geojson",
           data: {
@@ -65,6 +74,41 @@ function MapComponent() {
           },
         });
 
+        // add arrow layer
+        const image = await map.current?.loadImage("arrow.png");
+        if (!image) return;
+        map.current?.addImage("arrow", image.data);
+        map.current?.addLayer({
+          id: "direction-indicator",
+          type: "symbol",
+          source: {
+            type: "geojson",
+            data: {
+              type: "FeatureCollection",
+              features: [
+                {
+                  type: "Feature",
+                  id: "current-position",
+                  properties: { bearing: 0 },
+                  geometry: {
+                    type: "Point",
+                    coordinates: [lng, lat],
+                  },
+                },
+              ],
+            },
+          },
+          layout: {
+            "icon-image": "arrow",
+            "icon-rotate": ["get", "bearing"],
+            "icon-rotation-alignment": "auto",
+            "symbol-placement": "point",
+            "icon-size": 0.05,
+            "icon-allow-overlap": true,
+          },
+        });
+
+        // add GeolocateControl
         const glc = new GeolocateControl({
           trackUserLocation: true,
           showUserLocation: false,
@@ -78,13 +122,13 @@ function MapComponent() {
             lat: geoData.coords.latitude,
             lon: geoData.coords.longitude,
           });
-          toast(
-            `lat: ${geoData.coords.latitude}, lon:${geoData.coords.longitude}, H:${geoData.coords.heading}`,
-            {
-              position: "top-right",
-              style: { backgroundColor: "black", color: "white" },
-            }
-          );
+          // toast(
+          //   `lat: ${geoData.coords.latitude}, lon:${geoData.coords.longitude}, H:${geoData.coords.heading}`,
+          //   {
+          //     position: "top-right",
+          //     style: { backgroundColor: "black", color: "white" },
+          //   }
+          // );
         });
         map.current?.addControl(glc, "bottom-right");
       });
@@ -93,6 +137,69 @@ function MapComponent() {
       if (sub) sub.unsubscribe();
     };
   }, [map.current]);
+
+  // async function animateSymbol(featureId, newLng, newLat, duration = 1000) {
+  //   const source = map.current?.getSource("symbolSource") as GeoJSONSource;
+  //   map.current?.getFeatureState({source:"direction-indicator", id:"current-position"})
+  //   const feature =(await source?.getData() as GeoJSONFeature).features.find((f) => f.id === featureId);
+
+  //   if (!feature) {
+  //     console.error("Feature not found.");
+  //     return;
+  //   }
+
+  //   const startLng = feature.geometry.coordinates[0];
+  //   const startLat = feature.geometry.coordinates[1];
+  //   const startTime = performance.now();
+
+  //   async function updateFrame() {
+  //     const currentTime = performance.now();
+  //     const elapsed = currentTime - startTime;
+  //     const progress = Math.min(1, elapsed / duration); // Ensure progress doesn't exceed 1
+
+  //     if (progress < 1) {
+  //       const currentLng = startLng + (newLng - startLng) * progress;
+  //       const currentLat = startLat + (newLat - startLat) * progress;
+
+  //       feature.geometry.coordinates = [currentLng, currentLat];
+  //       source.setData(await source?.getData());
+
+  //       requestAnimationFrame(updateFrame);
+  //     } else {
+  //       // Animation complete, set the final coordinates
+  //       feature.geometry.coordinates = [newLng, newLat];
+  //       source.setData(await source?.getData());
+  //     }
+  //   }
+
+  //   requestAnimationFrame(updateFrame);
+  // }
+
+  useEffect(() => {
+    if (map.current && map.current?.getSource("direction-indicator")) {
+      (map.current?.getSource("direction-indicator") as GeoJSONSource)?.setData(
+        {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              properties: { bearing: degree },
+              geometry: {
+                type: "Point",
+                coordinates: [lonlat.lon, lonlat.lat],
+              },
+            },
+          ],
+        }
+      );
+      // map.current?.setFeatureState(
+      //   { source: 'my-source', id: featureId },
+      //   { targetLon: lonlat.lon, targetLat: lonlat.lat }
+      // );
+    }
+    return () => {};
+  }, [map.current, degree, lonlat]);
+
   // @ts-ignore
   window._map = map.current;
 
@@ -229,7 +336,7 @@ function MapComponent() {
         properties: {},
         geometry: geom,
       });
-      const data = source?.getData();
+      // const data = source?.getData();
       // data?.then((features) => {
       //   if (features) {
       //     const zz = features.bbox as maplibregl.LngLatBoundsLike;
